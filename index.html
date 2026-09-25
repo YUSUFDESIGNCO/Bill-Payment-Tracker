@@ -177,6 +177,19 @@ html.nav-collapsed .nav-item:hover{background:rgba(255,255,255,.10);color:#fff;}
 html.nav-collapsed .nav-item.active{background:var(--magenta);color:#fff;box-shadow:none;}
 html.nav-collapsed .nav-item:focus-visible{outline:3px solid #fff;outline-offset:2px;}
 html.nav-collapsed #sidebar .foot{display:block;padding:14px 20px 18px;color:rgba(255,255,255,.45);font-size:10.5px;border-top:1px solid rgba(255,255,255,.12);}
+/* Menu always stays a horizontal line (no ☰ drawer). When it can't share
+   the header row with the brand and actions, it moves to its own full-width
+   row directly under them; if that row is still too narrow (phones), it
+   scrolls sideways. */
+#sidebar-toggle{display:none!important;}
+html.nav-stacked #topbar{flex-wrap:wrap;row-gap:10px;padding-bottom:10px;}
+html.nav-stacked #sidebar{order:3;flex:1 0 100%;justify-content:flex-start;
+  overflow-x:auto;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;scrollbar-width:none;
+  border-top:1px solid var(--border);padding-top:10px;}
+html.nav-stacked #sidebar::-webkit-scrollbar{display:none;}
+html.nav-stacked #nav-container{margin-inline:auto;padding:2px 2px 12px;}
+html.nav-stacked .nav-item{flex-shrink:0;}
+#topbar .brand h1{white-space:nowrap;}
 @media(max-width:880px){
   #content{padding:16px 14px 60px;}
 }
@@ -5131,22 +5144,25 @@ function updateNavCollapse(){
   const sidebar = document.getElementById('sidebar');
   const nav = document.getElementById('nav-container');
   if(!sidebar || !nav) return;
-  const wasCollapsed = root.classList.contains('nav-collapsed');
+  if(sidebar.classList.contains('open')) closeSidebar(false);
   const fits = ()=> nav.getBoundingClientRect().width + 24 <= sidebar.getBoundingClientRect().width;
-  root.classList.remove('nav-collapsed','nav-tight');
-  let collapse = window.innerWidth <= 880;
-  if(!collapse && !fits()){
+  root.classList.remove('nav-collapsed','nav-tight','nav-stacked');
+  // 1) full size in one row  2) tighter spacing in one row
+  // 3) own row under the header  4) own row, tighter, scrolls sideways if needed
+  if(!fits()){
     root.classList.add('nav-tight');
-    if(!fits()) collapse = true;
+    if(!fits()){
+      root.classList.remove('nav-tight');
+      root.classList.add('nav-stacked');
+      if(!fits()) root.classList.add('nav-tight');
+    }
   }
-  if(collapse) root.classList.remove('nav-tight');
-  const modeChanged = collapse !== wasCollapsed;
-  // Switch layouts instantly (no slide animation when the menu mode changes).
-  if(modeChanged) sidebar.style.transition = 'none';
-  root.classList.toggle('nav-collapsed', collapse);
-  if(modeChanged){ void sidebar.offsetWidth; requestAnimationFrame(()=>{ sidebar.style.transition = ''; }); }
-  if(wasCollapsed && !collapse && sidebar.classList.contains('open')) closeSidebar(false);
-  syncSidebarAccessibility(collapse && sidebar.classList.contains('open'));
+  syncSidebarAccessibility(false);
+  const active = nav.querySelector('.nav-item.active');
+  if(active && root.classList.contains('nav-stacked')){
+    const sr = sidebar.getBoundingClientRect(), ar = active.getBoundingClientRect();
+    if(ar.left < sr.left || ar.right > sr.right) sidebar.scrollLeft += (ar.left + ar.width/2) - (sr.left + sr.width/2);
+  }
 }
 let SIDEBAR_LAST_FOCUS = null;
 function syncSidebarAccessibility(isOpen){
@@ -7888,9 +7904,18 @@ function refreshStaticChromeText(){
    ============================================================ */
 function initApp(){
   STORE.load();
-  // First run on this device: create the isolated Bill Payment Tracker
-  // namespace with the EMPTY default state so refreshes are stable.
-  if(STORE.storageWasEmpty) STORE.save();
+  // First run on this device (storage key never created): preload the
+  // existing demo data, exactly as "Load Demo Data" does, and save it so
+  // refreshes are stable. After Start Fresh the key exists, so this never re-runs.
+  if(STORE.storageWasEmpty){
+    try{
+      const demo = generateDemoData();
+      const cats = seedCategories(), methods = seedPaymentMethods();
+      STORE.state.categories = cats; STORE.state.paymentMethods = methods;
+      STORE.state.bills = demo.bills; STORE.state.payments = demo.payments;
+    }catch(e){ console.warn('Demo data could not be preloaded; starting empty.', e); }
+    STORE.save();
+  }
   initShellChrome();
   STORE.render();
   if(SAVE_OK === false){
